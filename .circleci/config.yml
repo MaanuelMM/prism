@@ -1,0 +1,154 @@
+version: 2.1
+executors:
+  docker-node:
+    docker:
+      - image: circleci/node:12
+  docker-harness:
+    docker:
+      - image: circleci/node:12
+      - image: kennethreitz/httpbin
+        name: httpbin
+  macos:
+    macos:
+      xcode: 10.2.1
+
+orbs:
+  stoplight: stoplight/cli@0.0.2
+jobs:
+  build:
+    executor: docker-node
+    steps:
+      - checkout
+      - restore_cache:
+          name: Restore Yarn Package Cache
+          keys:
+            - yarn-packages-{{ .Branch }}-{{ checksum "yarn.lock" }}
+      - run:
+          name: Install Dependencies
+          command: yarn --frozen-lockfile
+      - save_cache:
+          name: Save Yarn Package Cache
+          key: yarn-packages-{{ .Branch }}-{{ checksum "yarn.lock" }}
+          paths:
+            - node_modules/
+      - run:
+          name: Run tests
+          command: yarn test
+      - run:
+          name: Run build
+          command: yarn build
+  harness:
+    executor: << parameters.executor >>
+    parameters:
+      executor:
+        type: executor
+      install_manually:
+        type: boolean
+    steps:
+      - checkout
+      - when:
+          condition: <<parameters.install_manually>>
+          steps:
+            - run:
+                command: brew install pipenv
+                environment:
+                  HOMEBREW_NO_AUTO_UPDATE: 1
+            - run: sudo bash -c 'echo "0.0.0.0 httpbin" >> /etc/hosts'
+            - run: git clone https://github.com/postmanlabs/httpbin httpbin
+            - run: cd httpbin && pip3 install --no-cache-dir -r <(pipenv lock -r) && pip3 install --no-cache-dir ./
+            - run:
+                command: cd httpbin && gunicorn -b 0.0.0.0:80 httpbin:app -k gevent
+                background: true
+      - run:
+          name: Install Dependencies
+          command: yarn --frozen-lockfile
+      - run:
+          name: Create CLI binary
+          command: yarn build.binary
+      - run:
+          name: Run Harness
+          command: yarn test.harness
+  publish:
+    executor: docker-node
+    steps:
+      - checkout
+      - run:
+          name: Install Dependencies
+          command: yarn --frozen-lockfile
+      - run:
+          name: Build all code to JavaScript
+          command: yarn build
+      - run: echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
+      - run:
+          name: Publish
+          command: yarn lerna publish from-git --create-release=github --yes
+      - run:
+          name: Create CLI binaries
+          command: npx pkg --out-path ./cli-binaries --targets linux,macos ./packages/cli/
+      - store_artifacts:
+          path: ./cli-binaries
+      - persist_to_workspace:
+          root: ./
+          paths:
+            - cli-binaries
+  upload_artifacts:
+    docker:
+      - image: circleci/golang:1-stretch
+    steps:
+      - attach_workspace:
+          at: /tmp/
+      - run:
+          name: "Download GitHub Release Utility"
+          command: go get github.com/tcnksm/ghr
+      - run:
+          name: "Publish Release artifacts on GitHub"
+          command: ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} ${CIRCLE_TAG} /tmp/cli-binaries
+workflows:
+  version: 2
+  build:
+    jobs:
+      - build:
+          filters:
+            tags:
+              only: /.*/
+      - harness:
+          name: harness-macos
+          executor: macos
+          install_manually: true
+          filters:
+            branches:
+              only: master
+            tags:
+              only: /.*/
+      - harness:
+          executor: docker-harness
+          install_manually: false
+          filters:
+            tags:
+              only: /.*/
+      - publish:
+          filters:
+            branches:
+              only: master
+            tags:
+              only: /^v.*/
+          requires:
+            - build
+            - harness
+            - harness-macos
+      - upload_artifacts:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v.*/
+          requires:
+            - publish
+      - stoplight/analyze:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v.*/
+          requires:
+            - upload_artifacts
