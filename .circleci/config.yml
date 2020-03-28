@@ -77,15 +77,6 @@ workflows:
             tags:
               only: /.*/
       - harness:
-          name: harness-macos
-          executor: macos
-          install_manually: true
-          filters:
-            branches:
-              only: master
-            tags:
-              only: /.*/
-      - harness:
           executor: docker-harness
           install_manually: false
           filters:
