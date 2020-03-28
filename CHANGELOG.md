@@ -4,7 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to Semantic Versioning.
 
-# Unreleased
+# 3.2.10 (2020-03-28)
+
+## Fixed
+
+- Prism is now able to correctly differentiate between a preflight request and a regular `OPTIONS` request [#1031](https://github.com/stoplightio/prism/pull/1031)
+
+# 3.2.9 (2020-02-19)
 
 ## Fixed
 
