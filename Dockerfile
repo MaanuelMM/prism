@@ -58,4 +58,6 @@ fi
 
 EXPOSE 4010
 
-ENTRYPOINT [ "node", "dist/index.js" ]
+RUN apk add --no-cache tini
+# Tini is now available at /sbin/tini
+ENTRYPOINT ["/sbin/tini", "--", "node", "dist/index.js" ]
